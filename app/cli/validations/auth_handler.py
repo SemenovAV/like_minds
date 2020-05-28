@@ -2,6 +2,8 @@ import re
 
 import click
 
+import app.context
+
 
 def is_auth_data(data):
     patern = '.+@.+'
@@ -13,26 +15,37 @@ def is_token(data):
     return re.fullmatch(patern, data)
 
 
-def get_auth(data, logger):
+def get_auth(data):
     if is_auth_data(data):
         auth = data.split('@')
-        logger.info('Получены данные для получения токена')
         return {
             'login': auth[0],
             'password': auth[1]
         }
 
 
-def get_token(data, logger):
+
+def get_token(data, context):
     if is_token(data):
-        logger.info('Получен токен')
         return {'access_token': data}
 
 
-def auth_handler(ctx, opt, data, logger, config):
-    if data and (is_auth_data(data) or is_token(data)):
-        result = get_auth(data, logger) or get_token(data, logger)
-        return result
+@app.context.get_context
+def auth_handler(ctx, data, *args, **kwargs):
+    context = kwargs.get('this_app_context')
+    silent = context.silent
+    config = context.config
+    logger = context.logger
+
+    if silent:
+        logger.setLevel(50)
+    if data and is_auth_data(data):
+        logger.info('Получены данные для аунтификации')
+        return get_auth(data)
+    elif data and is_token(data):
+        logger.info('Получен токен')
+        return get_token(data,context)
+
     elif not data:
         token = config.get_section('app').get('access_token').value
         if token:
@@ -40,8 +53,8 @@ def auth_handler(ctx, opt, data, logger, config):
             result = {'access_token': token}
             return result
         else:
-            logger.warning('Токен безопасности отсутствует!!!')
-            if logger.level < 49:
+
+            if logger.level < 50:
                 data = '-1'
                 while data and not is_auth_data(data) and not is_token(data):
                     if data != '-1':
@@ -55,13 +68,16 @@ def auth_handler(ctx, opt, data, logger, config):
                             default=False,
                             show_default=False
                         )
-                if data:
-                    auth_data = get_auth(data, logger)
-                    access_token = get_token(data, logger)
-                    return auth_data or access_token
-                else:
-                    logger.critical('Данные отсутствуют!!!')
-                    ctx.exit(2)
+                if data and is_auth_data(data):
+                    logger.info('Получены данные для аунтификации')
+                    return get_auth(data)
+                elif data and is_token(data):
+                    logger.info('Получен токен')
+                    return get_token(data,context)
+
+            else:
+                logger.critical('Отсутствуют токен и данные для его получения!')
+                ctx.exit(2)
 
 
     else:
